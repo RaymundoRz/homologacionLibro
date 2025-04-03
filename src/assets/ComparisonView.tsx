@@ -134,6 +134,7 @@ function ComparisonView() {
         console.log("Processed Data:", processedData);
         if (type === 'new') {
           setNewData(processedData);
+          console.log("Processed Data:", processedData);
           setPreviewData(processedData);
           await window.api.clearData('newData');
           await window.api.addData('newData', processedData);
@@ -153,43 +154,86 @@ function ComparisonView() {
 
   // Función para comparar los datos almacenados (obtenidos mediante IPC)
   const handleComparison = async () => {
-    // Aquí deberías usar la API expuesta por el preload, por ejemplo window.api.getAllData
-    // Por simplicidad, asumiremos que ya tienes los datos en newData y baseData
     if (!newData || !baseData) {
       alert("Por favor, cargue ambos archivos antes de comparar.");
       return;
     }
-    const newDataArray = newData; // Usa el array completo
-    const baseDataArray = baseData; // Lo mismo para baseData
-
+    
+    console.log("newData completo:", newData);
+    console.log("baseData completo:", baseData);
+    
+    // Si la primera fila es la cabecera y no deseas compararla, usa slice(1)
+    const newDataArray = newData.slice(1);
+    const baseDataArray = baseData.slice(1);
+    
+    console.log("newDataArray sin cabecera:", newDataArray);
+    console.log("baseDataArray sin cabecera:", baseDataArray);
+    
     const diffNew = newDataArray.map((newRow: any, rowIndex: number) => {
-      const baseRow = baseDataArray[rowIndex] || [];
-      const rowDiff = newRow.map((cell: any, cellIndex: number) => {
-        const isDifferent = cell !== baseRow[cellIndex];
-        return {
+      if (!Array.isArray(newRow)) {
+        console.error(`Fila ${rowIndex} en newData no es un array:`, newRow);
+        return { data: [] };
+      }
+      const baseRow = Array.isArray(baseDataArray[rowIndex]) ? baseDataArray[rowIndex] : [];
+      const minCols = Math.min(newRow.length, baseRow.length);
+      const rowDiff = [];
+      for (let cellIndex = 0; cellIndex < minCols; cellIndex++) {
+        const cell = newRow[cellIndex];
+        const baseCell = baseRow[cellIndex];
+        const isDifferent = cell !== baseCell;
+        rowDiff.push({
           value: cell,
           isDifferent,
           status: isDifferent ? 'incorrect' : 'correct',
-        };
-      });
+        });
+      }
+      // Si newRow tiene más columnas que baseRow, marcar esas celdas como "incorrect"
+      for (let cellIndex = minCols; cellIndex < newRow.length; cellIndex++) {
+        rowDiff.push({
+          value: newRow[cellIndex],
+          isDifferent: true,
+          status: 'incorrect',
+        });
+      }
       return { data: rowDiff };
     });
+    
     const diffBase = baseDataArray.map((baseRow: any, rowIndex: number) => {
-      const newRow = newDataArray[rowIndex] || [];
-      const rowDiff = baseRow.map((cell: any, cellIndex: number) => {
-        const isMissing = cell !== newRow[cellIndex];
-        return {
+      if (!Array.isArray(baseRow)) {
+        console.error(`Fila ${rowIndex} en baseData no es un array:`, baseRow);
+        return { data: [] };
+      }
+      const newRow = Array.isArray(newDataArray[rowIndex]) ? newDataArray[rowIndex] : [];
+      const minCols = Math.min(baseRow.length, newRow.length);
+      const rowDiff = [];
+      for (let cellIndex = 0; cellIndex < minCols; cellIndex++) {
+        const cell = baseRow[cellIndex];
+        const newCell = newRow[cellIndex];
+        const isDifferent = cell !== newCell;
+        rowDiff.push({
           value: cell,
-          status: isMissing ? 'incorrect' : 'correct',
-        };
-      });
+          status: isDifferent ? 'incorrect' : 'correct',
+        });
+      }
+      // Si baseRow tiene más columnas que newRow, marcar esas celdas como "incorrect"
+      for (let cellIndex = minCols; cellIndex < baseRow.length; cellIndex++) {
+        rowDiff.push({
+          value: baseRow[cellIndex],
+          status: 'incorrect',
+        });
+      }
       return { data: rowDiff };
     });
+    
+    console.log("Diferencias para newData:", diffNew);
+    console.log("Diferencias para baseData:", diffBase);
+    
     setDifferencesNew(diffNew);
     setDifferencesBase(diffBase);
     setIsNewWindowOpen(true);
     setIsBaseWindowOpen(true);
   };
+  
 
   // Función para renderizar el PDF en el canvas
   const renderPdf = () => {
