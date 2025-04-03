@@ -1,0 +1,198 @@
+/* ---------- Estilos Globales ---------- */
+html, body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Roboto', sans-serif;
+  background-color: #121212;
+  color: #ffffff;
+  overflow: hidden;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* ---------- Contenedor Principal ---------- */
+.admin-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: linear-gradient(135deg, #1f1f1f, #2a2a2a);
+  animation: fadeIn 1s ease-in;
+}
+
+/* ---------- Navbar ---------- */
+.navbar {
+  background: rgba(0, 0, 0, 0.85);
+  padding: 10px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.6);
+  transition: background 0.3s ease;
+}
+.navbar:hover {
+  background: rgba(0, 0, 0, 0.95);
+}
+.navbar h1 {
+  margin: 0;
+}
+.navbar-buttons {
+  display: flex;
+  gap: 15px;
+}
+
+/* ---------- Sidebar ---------- */
+.sidebar {
+  background: #1f1f1f;
+  width: 220px;
+  padding: 20px;
+  border-right: 2px solid #333;
+  transition: width 0.3s ease;
+  flex-shrink: 0;
+}
+.sidebar:hover {
+  width: 240px;
+}
+.sidebar ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.sidebar li {
+  padding: 10px;
+  margin-bottom: 10px;
+  cursor: pointer;
+  transition: background 0.3s;
+  border-radius: 4px;
+}
+.sidebar li:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* ---------- Main Content ---------- */
+.main-content {
+  flex: 1;
+  padding: 20px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* ---------- Sección de Carga (Upload Section) ---------- */
+.upload-section {
+  background: rgba(255, 255, 255, 0.05);
+  padding: 20px;
+  border-radius: 10px;
+  transition: transform 0.3s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+.upload-section:hover {
+  transform: scale(1.02);
+}
+.upload-section h3 {
+  margin-top: 0;
+}
+.upload-section input[type="file"] {
+  margin-bottom: 5px;
+  background: #2a2a2a;
+  color: #ffffff;
+  padding: 5px;
+  border: none;
+  border-radius: 4px;
+  transition: background 0.3s;
+}
+.upload-section input[type="file"]:hover {
+  background: #333333;
+}
+.upload-section button {
+  margin-right: 10px;
+  margin-bottom: 10px;
+}
+
+/* Botones (MUI) con algo de margen y animación */
+.MuiButton-root {
+  transition: background-color 0.3s ease, transform 0.3s ease;
+  margin-right: 10px;
+  margin-bottom: 10px;
+}
+.MuiButton-root:hover {
+  transform: scale(1.05);
+}
+
+/* ---------- Footer ---------- */
+footer {
+  background: rgba(0, 0, 0, 0.85);
+  padding: 10px 20px;
+  display: flex;
+  justify-content: center;
+  gap: 15px; /* Espacio entre botones de footer */
+  box-shadow: 0 -4px 8px rgba(0, 0, 0, 0.6);
+  transition: background 0.3s ease;
+}
+footer:hover {
+  background: rgba(0, 0, 0, 0.95);
+}
+
+/* ---------- Minimized Windows Bar ---------- */
+.minimized-windows-bar {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.minimized-windows-bar button {
+  background: #333;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #fff;
+  transition: transform 0.3s ease;
+}
+.minimized-windows-bar button:hover {
+  transform: scale(1.05);
+  background: #444;
+}
+
+/* ---------- Ventanas Flotantes ---------- */
+.floating-windows-container {
+  position: relative;
+  z-index: 1000;
+}
+.floating-window {
+  background: rgba(0, 0, 0, 0.85);
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 20px;
+  animation: slideIn 0.5s ease-out;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+/* ---------- DataGrid (MUI) ---------- */
+.MuiDataGrid-root {
+  background: rgba(0, 0, 0, 0.7);
+  border: none;
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 20px;
+}
+.MuiDataGrid-cell {
+  transition: background-color 0.3s;
+}
+.MuiDataGrid-cell:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+/* ---------- Animaciones ---------- */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes slideIn {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
