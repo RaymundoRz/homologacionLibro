@@ -1,74 +1,299 @@
 // src/ComparisonView.tsx
 import React, { useState, useRef, useEffect } from 'react';
 import "../App.css";
-import * as XLSX from "xlsx"; // Si necesitas, para otras tareas
-import { Button, TableContainer, Table, TableHead, TableRow, TableBody, TableCell, Paper } from "@mui/material";
-import { DataGrid } from "@mui/x-data-grid";
-import pdfjsLib from "./pdfWorker"; // Asegúrate de que pdfWorker existe
+import * as XLSX from "xlsx";
+import { Button } from "@mui/material";
+import pdfjsLib from "./pdfWorker";
 import FloatingWindow from "./FloatingWindow.jsx";
+import DataModal from '../components/DataModal';
+import EditableExcelTable from '../components/EditableExcelTable';
+
+
+
+/* ============================================================
+   LÓGICA DE TRANSFORMACIÓN
+   ============================================================ */
+
+/**
+ * parseYearAndNote:
+ * Dado un texto tipo "2025 INTEGRA Unidades Nuevas",
+ * extrae el año (p. ej. 2025) y la nota (p. ej. "INTEGRA Unidades Nuevas").
+ */
+function parseYearAndNote(text: string): { year: number; note: string } {
+  // Buscamos un año de 4 dígitos
+  const match = text.match(/\b(19|20)\d{2}\b/);
+  if (!match) {
+    // Si no se encuentra un año, devolvemos año=0 y el texto original
+    return { year: 0, note: text.trim() };
+  }
+  const year = Number(match[0]);
+  // Eliminamos el año encontrado para quedarnos con el resto
+  const note = text.replace(match[0], "").trim();
+  return { year, note };
+}
+
+/**
+ * getNotePriority:
+ * Devuelve un número menor para “Unidades Nuevas”, un número intermedio para “Unidades Usadas”,
+ * y un número mayor para cualquier otro caso, de modo que en el sort salgan primero las nuevas,
+ * luego las usadas, y luego sin aclaración.
+ */
+function getNotePriority(note: string): number {
+  const lower = note.toLowerCase();
+  if (lower.includes("nueva")) return 1;    // "Unidades Nuevas"
+  if (lower.includes("usada")) return 2;    // "Unidades Usadas"
+  return 3;                                 // Sin aclaración
+}
+
+
+/**
+ * Función adjustTipoColumn:
+ * Inserta filas con 0 según la regla:
+ * - Para tipo 1: se inserta un 0 antes y después.
+ * - Para tipo 2: se requiere que exista un 0 justo antes.
+ * Las demás filas se dejan sin modificar.
+ */
+function adjustTipoColumn(rows: any[][]): any[][] {
+  const adjusted: any[][] = [];
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const tipo = Number(row[0]);
+
+    if (isNaN(tipo)) {
+      adjusted.push(row);
+      continue;
+    }
+
+    if (tipo === 1) {
+      // ... (lógica tipo 1 sin cambios) ...
+      if (adjusted.length === 0 || Number(adjusted[adjusted.length - 1][0]) !== 0) {
+        adjusted.push([0, ...new Array(row.length - 1).fill('')]);
+      }
+      adjusted.push(row);
+      if (i === rows.length - 1 || Number(rows[i + 1]?.[0]) !== 0) { // Added optional chaining for safety
+        adjusted.push([0, ...new Array(row.length - 1).fill('')]);
+      }
+    } else if (tipo === 2) {
+      // *** INICIO DEBUG ***
+      console.log(`--- Fila ${i} ---`); // Identificador de fila (índice base 0)
+      console.log("Procesando fila TIPO 2:", row);
+      if (adjusted.length > 0) {
+          const precedingRowInAdjusted = adjusted[adjusted.length - 1];
+          const precedingValue = precedingRowInAdjusted[0];
+          const precedingType = typeof precedingValue;
+          const precedingNumber = Number(precedingValue);
+          console.log("Fila ANTERIOR en 'adjusted':", precedingRowInAdjusted);
+          console.log(`  Valor anterior [0]: >>${precedingValue}<< | Tipo: ${precedingType} | Convertido a número: ${precedingNumber}`);
+          console.log(`  Condición a evaluar: adjusted.length === 0 (${adjusted.length === 0}) || Number(precedingValue) !== 0 (${precedingNumber !== 0})`);
+      } else {
+          console.log("Lista 'adjusted' está vacía.");
+          console.log(`  Condición a evaluar: adjusted.length === 0 (true)`);
+      }
+      // *** FIN DEBUG ***
+
+      // La condición original:
+      if (adjusted.length === 0 || Number(adjusted[adjusted.length - 1]?.[0]) !== 0) { // Added optional chaining
+        console.log(">>> CONDICIÓN CUMPLIDA (true): Añadiendo fila de ceros.");
+        adjusted.push([0, ...new Array(row.length - 1).fill('')]);
+      } else {
+        console.log(">>> CONDICIÓN NO CUMPLIDA (false): NO se añade fila de ceros.");
+      }
+      adjusted.push(row);
+
+    } else {
+      adjusted.push(row);
+    }
+  }
+  return adjusted;
+}
+
+
+/**
+ * reorderYearsInSection:
+ * Dentro de una sección (iniciada por un tipo=2), agrupa sub-bloques tipo=3 y sus versiones tipo=4,
+ * luego ordena esos sub-bloques por año desc y por prioridad de nota (nuevas/usadas).
+ */
+function reorderYearsInSection(sectionRows: any[][]): any[][] {
+  // Array de sub-bloques
+  const subBlocks: { 
+    year: number; 
+    note: string; 
+    rows: any[][];  // fila tipo=3 y las filas tipo=4 subsecuentes
+  }[] = [];
+
+  let currentBlock: { year: number; note: string; rows: any[][] } | null = null;
+
+  // Recorremos las filas de la sección
+  for (let i = 0; i < sectionRows.length; i++) {
+    const row = sectionRows[i];
+    const tipo = Number(row[0]);
+
+    if (tipo === 3) {
+      // Cada vez que encontramos tipo=3, iniciamos un sub-bloque nuevo
+      // parseamos el texto donde aparece el año
+      const versionesText = row[2] || "";
+      const { year, note } = parseYearAndNote(versionesText);
+
+      // Si había un bloque anterior en curso, lo cerramos
+      if (currentBlock) {
+        subBlocks.push(currentBlock);
+      }
+      currentBlock = {
+        year,
+        note,
+        rows: [row],
+      };
+    } else if (tipo === 4 && currentBlock) {
+      // Si es tipo=4 y hay un bloque en curso, lo agregamos
+      currentBlock.rows.push(row);
+    } else {
+      // Si es tipo=2 (la cabecera de la sección) o tipo≠3/4,
+      // lo ignoramos aquí. O podríamos dejarlo para “cabezal”.
+      // Suponiendo que la fila con tipo=2 ya la sacamos aparte.
+    }
+  }
+
+  // Agrega el último bloque si quedó abierto
+  if (currentBlock) {
+    subBlocks.push(currentBlock);
+  }
+
+  // Ordenar por año desc, luego por prioridad de nota
+  subBlocks.sort((a, b) => {
+    // Primero comparamos año desc
+    if (b.year !== a.year) {
+      return b.year - a.year;
+    }
+    // Mismo año: prioridad de nota
+    return getNotePriority(a.note) - getNotePriority(b.note);
+  });
+
+  // Reconstruir: 
+  // - Devolvemos la primera fila si es tipo=2, 
+  // - luego todos los sub-bloques en orden
+  const result: any[][] = [];
+  if (sectionRows.length > 0 && Number(sectionRows[0][0]) === 2) {
+    result.push(sectionRows[0]); // la fila del tipo=2
+  }
+  subBlocks.forEach(block => {
+    result.push(...block.rows);
+  });
+
+  return result;
+}
+
+
+/**
+ * reorderAll:
+ * - Toma el worksheet completo (con cabecera).
+ * - Separa la cabecera.
+ * - Agrupa en “secciones” cada vez que encuentra un tipo=2.
+ * - En cada sección, aplica reorderYearsInSection.
+ */
+function reorderAll(worksheet: any[][]): any[][] {
+  if (!worksheet || worksheet.length === 0) return [];
+
+  // 1. Separamos cabecera
+  const header = worksheet[0];
+  const dataRows = worksheet.slice(1);
+
+  // 2. Recorremos dataRows y cada vez que detectamos un tipo=2 “cerramos” la sección previa
+  let result: any[][] = [header];
+  let currentSection: any[][] = [];
+  let inSection = false;
+
+  for (let i = 0; i < dataRows.length; i++) {
+    const row = dataRows[i];
+    const tipo = Number(row[0]);
+
+    if (tipo === 2) {
+      // Si ya estábamos en una sección, la reordenamos y la añadimos
+      if (inSection && currentSection.length > 0) {
+        const reordered = reorderYearsInSection(currentSection);
+        result.push(...reordered);
+      }
+      // Iniciamos nueva sección
+      currentSection = [row];
+      inSection = true;
+    } else if (inSection) {
+      // Mientras estemos en sección
+      currentSection.push(row);
+    } else {
+      // Fila fuera de sección => va directo a result
+      result.push(row);
+    }
+  }
+
+  // Al final, si quedó una sección abierta, la reordenamos
+  if (inSection && currentSection.length > 0) {
+    const reordered = reorderYearsInSection(currentSection);
+    result.push(...reordered);
+  }
+
+  return result;
+}
+
+
+/**
+ * Función processNewData:
+ * Aplica filtros previos, ajusta la columna Tipo y reordena el archivo.
+ */
+function processNewData(worksheet: any[][]): any[][] {
+  if (!worksheet || worksheet.length === 0) return [];
+
+  // 1. Separa cabecera
+  const header = worksheet[0];
+  const dataRows = worksheet.slice(1);
+
+  // 2. Ajustar la columna Tipo (inserta ceros)
+  const adjustedTipo = adjustTipoColumn(dataRows);
+
+  // 3. Reconstruir con cabecera
+  const adjustedWorksheet = [header, ...adjustedTipo];
+
+  // 4. Llamar a reorderAll para ordenar por años y notas
+  const reordered = reorderAll(adjustedWorksheet);
+
+  return reordered;
+}
+
+
+
 
 function ComparisonView() {
   const [newData, setNewData] = useState<any>(null);
-  const [baseData, setBaseData] = useState<any>(null);
-  const [differencesNew, setDifferencesNew] = useState<any[]>([]);
-  const [differencesBase, setDifferencesBase] = useState<any[]>([]);
-  const [isNewWindowOpen, setIsNewWindowOpen] = useState(false);
-  const [isBaseWindowOpen, setIsBaseWindowOpen] = useState(false);
-  const [isPdfWindowOpen, setIsPdfWindowOpen] = useState(false);
-  const [isPreviewWindowOpen, setIsPreviewWindowOpen] = useState(false);
-  const [isEditWindowOpen, setIsEditWindowOpen] = useState(false);
-  const [selectedCell, setSelectedCell] = useState<any>(null);
-  const [editedValue, setEditedValue] = useState('');
-  const [minimizedWindows, setMinimizedWindows] = useState<string[]>([]);
   const [pdfFile, setPdfFile] = useState<any>(null);
   const [previewData, setPreviewData] = useState<any>(null);
   const [processingProgress, setProcessingProgress] = useState<number>(0);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [isExcelSplitterOpen, setIsExcelSplitterOpen] = useState(false);
+  const [isPdfWindowOpen, setIsPdfWindowOpen] = useState(false);
+  const [isPreviewWindowOpen, setIsPreviewWindowOpen] = useState(false);
+  const [minimizedWindows, setMinimizedWindows] = useState<string[]>([]);
+  const [isNewWindowOpen, setIsNewWindowOpen] = useState(false);
 
-  // Manejo de ventanas
-  const handleCloseNewWindow = () => setIsNewWindowOpen(false);
-  const handleCloseBaseWindow = () => setIsBaseWindowOpen(false);
+  // Estado del modal para mostrar la data transformada
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalData, setModalData] = useState<any>(null);
+
+  // Ventanas flotantes
   const handleClosePdfWindow = () => setIsPdfWindowOpen(false);
   const handleClosePreviewWindow = () => setIsPreviewWindowOpen(false);
-  const handleCloseEditWindow = () => setIsEditWindowOpen(false);
-
   const handleMinimizeWindow = (title: string) => {
-    setMinimizedWindows((prev) => [...prev, title]);
-    if (title === "Resultados del Archivo Nuevo") {
-      setIsNewWindowOpen(false);
-    } else if (title === "Resultados del Archivo Base") {
-      setIsBaseWindowOpen(false);
-    } else if (title === "Visor de PDF") {
-      setIsPdfWindowOpen(false);
-    } else if (title === "Vista Previa Completa del Archivo") {
-      setIsPreviewWindowOpen(false);
-    } else if (title === "Editar Celda") {
-      setIsEditWindowOpen(false);
-    }
+    setMinimizedWindows(prev => [...prev, title]);
+    if (title === "PDF") setIsPdfWindowOpen(false);
+    if (title === "Vista Previa") setIsPreviewWindowOpen(false);
+    if (title === "Nuevo") setIsNewWindowOpen(false);
   };
-
   const restoreWindow = (title: string) => {
-    setMinimizedWindows((prev) => prev.filter((t) => t !== title));
-    if (title === "Resultados del Archivo Nuevo") {
-      setIsNewWindowOpen(true);
-    } else if (title === "Resultados del Archivo Base") {
-      setIsBaseWindowOpen(true);
-    } else if (title === "Visor de PDF") {
-      setIsPdfWindowOpen(true);
-    } else if (title === "Vista Previa Completa del Archivo") {
-      setIsPreviewWindowOpen(true);
-    } else if (title === "Editar Celda") {
-      setIsEditWindowOpen(true);
-    }
+    setMinimizedWindows(prev => prev.filter(t => t !== title));
+    if (title === "PDF") setIsPdfWindowOpen(true);
+    if (title === "Vista Previa") setIsPreviewWindowOpen(true);
+    if (title === "Nuevo") setIsNewWindowOpen(true);
   };
-
   const MinimizedWindowsBar = () => (
     <div className="minimized-windows-bar">
       {minimizedWindows.map((title, index) => (
-        <button key={index} onClick={() => restoreWindow(title)}>
-          {title}
-        </button>
+        <button key={index} onClick={() => restoreWindow(title)}>{title}</button>
       ))}
     </div>
   );
@@ -77,165 +302,41 @@ function ComparisonView() {
   useEffect(() => {
     if (isPdfWindowOpen && pdfFile) {
       const canvas = canvasRef.current;
-      if (canvas) {
-        renderPdf();
-      }
+      if (canvas) renderPdf();
     }
   }, [isPdfWindowOpen, pdfFile]);
 
-  // Función para procesar el archivo Excel usando un Web Worker
-  const processFileWithWorker = (file: File) => {
-    return new Promise((resolve, reject) => {
-      // Crea el Worker (usa new URL para que Vite lo empaquete correctamente)
-      const worker = new Worker(new URL('./excelWorker.js', import.meta.url));
-      
-      worker.onmessage = (event) => {
-        if (event.data.progress !== undefined) {
-          setProcessingProgress(event.data.progress);
-        }
-        if (event.data.result) {
-          resolve(event.data.result);
-          worker.terminate();
-        }
-        if (event.data.error) {
-          reject(event.data.error);
-          worker.terminate();
-        }
-      };
-      
-      worker.onerror = (err) => {
-        reject(err.message);
-        worker.terminate();
-      };
-      
-      // Leer el archivo como binario y enviarlo al Worker
-      const reader = new FileReader();
-      reader.onload = () => {
-        worker.postMessage({ fileData: reader.result });
-      };
-      reader.onerror = () => {
-        reject("Error al leer el archivo");
-        worker.terminate();
-      };
-      reader.readAsBinaryString(file);
-    });
-  };
-
-  // Manejo de carga de archivo (para Excel y PDF)
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'new' | 'base' | 'pdf') => {
+  // Función para manejar la carga de archivos (Excel y PDF)
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'new' | 'pdf') => {
     const file = e.target.files?.[0];
     if (!file) return;
-  
+
     if (type === 'pdf') {
       setPdfFile(file);
-    } else {
-      try {
-        const processedData = await processFileWithWorker(file);
-        console.log("Processed Data:", processedData);
-        if (type === 'new') {
-          setNewData(processedData);
-          console.log("Processed Data:", processedData);
-          setPreviewData(processedData);
-          await window.api.clearData('newData');
-          await window.api.addData('newData', processedData);
-        } else if (type === 'base') {
-          setBaseData(processedData);
-          console.log("Estructura de baseData después de la carga:", JSON.stringify(processedData, null, 2));
-          await window.api.clearData('baseData');
-          await window.api.addData('baseData', processedData);
-        }
-      } catch (error) {
-        console.error("Error en el procesamiento del archivo:", error);
-        alert("Error en el procesamiento del archivo: " + error);
-      }
+    } else if (type === 'new') {
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        const binaryStr = event.target?.result;
+        if (typeof binaryStr !== 'string') return;
+        const workbook = XLSX.read(binaryStr, { type: 'binary' });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {
+          header: 1,
+          defval: '',
+          blankrows: true,
+        });
+        // Guarda la data original y de vista previa
+        setNewData(worksheet);
+        setPreviewData(worksheet);
+        // Guarda en SQLite vía IPC (asumiendo que window.api está configurado en preload)
+        await window.api.clearData('newData');
+        await window.api.addData('newData', worksheet);
+      };
+      reader.readAsBinaryString(file);
     }
   };
-  
 
-  // Función para comparar los datos almacenados (obtenidos mediante IPC)
-  const handleComparison = async () => {
-    if (!newData || !baseData) {
-      alert("Por favor, cargue ambos archivos antes de comparar.");
-      return;
-    }
-    
-    console.log("newData completo:", newData);
-    console.log("baseData completo:", baseData);
-    
-    // Si la primera fila es la cabecera y no deseas compararla, usa slice(1)
-    const newDataArray = newData.slice(1);
-    const baseDataArray = baseData.slice(1);
-    
-    console.log("newDataArray sin cabecera:", newDataArray);
-    console.log("baseDataArray sin cabecera:", baseDataArray);
-    
-    const diffNew = newDataArray.map((newRow: any, rowIndex: number) => {
-      if (!Array.isArray(newRow)) {
-        console.error(`Fila ${rowIndex} en newData no es un array:`, newRow);
-        return { data: [] };
-      }
-      const baseRow = Array.isArray(baseDataArray[rowIndex]) ? baseDataArray[rowIndex] : [];
-      const minCols = Math.min(newRow.length, baseRow.length);
-      const rowDiff = [];
-      for (let cellIndex = 0; cellIndex < minCols; cellIndex++) {
-        const cell = newRow[cellIndex];
-        const baseCell = baseRow[cellIndex];
-        const isDifferent = cell !== baseCell;
-        rowDiff.push({
-          value: cell,
-          isDifferent,
-          status: isDifferent ? 'incorrect' : 'correct',
-        });
-      }
-      // Si newRow tiene más columnas que baseRow, marcar esas celdas como "incorrect"
-      for (let cellIndex = minCols; cellIndex < newRow.length; cellIndex++) {
-        rowDiff.push({
-          value: newRow[cellIndex],
-          isDifferent: true,
-          status: 'incorrect',
-        });
-      }
-      return { data: rowDiff };
-    });
-    
-    const diffBase = baseDataArray.map((baseRow: any, rowIndex: number) => {
-      if (!Array.isArray(baseRow)) {
-        console.error(`Fila ${rowIndex} en baseData no es un array:`, baseRow);
-        return { data: [] };
-      }
-      const newRow = Array.isArray(newDataArray[rowIndex]) ? newDataArray[rowIndex] : [];
-      const minCols = Math.min(baseRow.length, newRow.length);
-      const rowDiff = [];
-      for (let cellIndex = 0; cellIndex < minCols; cellIndex++) {
-        const cell = baseRow[cellIndex];
-        const newCell = newRow[cellIndex];
-        const isDifferent = cell !== newCell;
-        rowDiff.push({
-          value: cell,
-          status: isDifferent ? 'incorrect' : 'correct',
-        });
-      }
-      // Si baseRow tiene más columnas que newRow, marcar esas celdas como "incorrect"
-      for (let cellIndex = minCols; cellIndex < baseRow.length; cellIndex++) {
-        rowDiff.push({
-          value: baseRow[cellIndex],
-          status: 'incorrect',
-        });
-      }
-      return { data: rowDiff };
-    });
-    
-    console.log("Diferencias para newData:", diffNew);
-    console.log("Diferencias para baseData:", diffBase);
-    
-    setDifferencesNew(diffNew);
-    setDifferencesBase(diffBase);
-    setIsNewWindowOpen(true);
-    setIsBaseWindowOpen(true);
-  };
-  
-
-  // Función para renderizar el PDF en el canvas
+  // Función para renderizar el PDF
   const renderPdf = () => {
     const canvas = canvasRef.current;
     if (!canvas) {
@@ -246,15 +347,12 @@ function ComparisonView() {
     const fileReader = new FileReader();
     fileReader.onload = function () {
       const typedArray = new Uint8Array(this.result);
-      pdfjsLib.getDocument(typedArray).promise.then(function (pdf) {
-        pdf.getPage(1).then(function (page) {
+      pdfjsLib.getDocument(typedArray).promise.then(pdf => {
+        pdf.getPage(1).then(page => {
           const viewport = page.getViewport({ scale: 1.5 });
           canvas.height = viewport.height;
           canvas.width = viewport.width;
-          const renderContext = {
-            canvasContext: context,
-            viewport: viewport,
-          };
+          const renderContext = { canvasContext: context, viewport: viewport };
           page.render(renderContext);
         });
       });
@@ -262,58 +360,26 @@ function ComparisonView() {
     fileReader.readAsArrayBuffer(pdfFile);
   };
 
-  // Función para renderizar celdas en el DataGrid
-  const renderCell = (params: any) => {
-    const { value } = params.value || {};
-    const displayValue = typeof value === 'object' ? JSON.stringify(value) : value;
-    const color = params.value?.status === 'incorrect' ? 'red' : 'green';
-    return <span style={{ color }}>{displayValue}</span>;
-  };
-
-  // Manejo de clic en una celda para editarla
-  const handleCellClick = (params: any) => {
-    setSelectedCell(params);
-    setEditedValue(params.value.value);
-    setIsEditWindowOpen(true);
-  };
-
-  // Guardar cambios de edición en una celda
-  const handleEditSave = () => {
-    if (selectedCell) {
-      const updatedRows = [...differencesNew];
-      const rowToUpdate = updatedRows[selectedCell.id];
-      if (rowToUpdate) {
-        const cellIndex = parseInt(selectedCell.field.replace('column', ''), 10);
-        const updatedCell = rowToUpdate.data[cellIndex];
-        if (updatedCell) {
-          updatedCell.value = editedValue;
-          updatedCell.status =
-            updatedCell.value === baseData[selectedCell.id][cellIndex]
-              ? 'correct'
-              : 'incorrect';
-        }
-        setDifferencesNew(updatedRows);
-        setIsEditWindowOpen(false);
-      }
+  // Función para aplicar cambios (filtros, ajustes, reordenamiento) al archivo nuevo
+  const handleApplyChanges = async () => {
+    if (!newData) {
+      alert("No hay un archivo nuevo cargado.");
+      return;
     }
-  };
-
-  // Función para guardar los cambios en SQLite (actualizando newData) mediante IPC
-  const handleSaveChanges = async () => {
-    try {
-      await window.api.clearData('newData');
-      await window.api.addData('newData', differencesNew.map((row: any) => row.data));
-      alert("Cambios guardados exitosamente.");
-    } catch (error) {
-      console.error("Error al guardar los cambios:", error);
-      alert("Hubo un error al guardar los cambios.");
-    }
+    const modifiedData = processNewData(newData);
+    console.log("Data transformada:", modifiedData);
+    setNewData(modifiedData);
+    setModalData(modifiedData);
+    setModalOpen(true);
+    // Actualizar en SQLite vía IPC
+    await window.api.clearData('newData');
+    await window.api.addData('newData', modifiedData);
   };
 
   return (
     <div className="admin-container">
       <nav className="navbar">
-        <h1>Administrador de Comparación de Datos</h1>
+        <h1>Administrador de Datos (Electron + SQLite)</h1>
         <div className="navbar-buttons">
           <Button variant="contained">Configuración</Button>
           <Button variant="contained">Ayuda</Button>
@@ -321,9 +387,7 @@ function ComparisonView() {
       </nav>
       <div className="sidebar">
         <ul>
-          <li onClick={() => {}}>Dividir Excel</li>
-          <li>Comparar Datos</li>
-          <li>Ver Diferencias</li>
+          <li>Mostrar Datos</li>
           <li>Búsqueda en PDF</li>
           <li>Historial</li>
         </ul>
@@ -333,152 +397,74 @@ function ComparisonView() {
           <h3>Cargar Archivos</h3>
           <input type="file" accept=".xlsx, .xls" onChange={(e) => handleFileUpload(e, 'new')} />
           <p>Subir Archivo Nuevo</p>
-          <input type="file" accept=".xlsx, .xls" onChange={(e) => handleFileUpload(e, 'base')} />
-          <p>Subir Archivo Base</p>
           <input type="file" accept=".pdf" onChange={(e) => handleFileUpload(e, 'pdf')} />
           <p>Subir PDF</p>
-          <Button variant="contained" color="primary" onClick={handleComparison}>Comparar Archivos</Button>
-          <Button variant="contained" onClick={() => {}} style={{ marginTop: '20px' }}>
+          <Button variant="contained" onClick={handleApplyChanges} style={{ marginTop: '20px' }}>
+            Aplicar Cambios (Archivo Nuevo)
+          </Button>
+          <Button variant="contained" onClick={() => setIsPreviewWindowOpen(true)} style={{ marginTop: '20px' }}>
             Vista Previa Completa
           </Button>
-          <Button variant="contained" onClick={() => {}} style={{ marginTop: '20px' }}>
+          <Button variant="contained" onClick={() => setIsPdfWindowOpen(true)} style={{ marginTop: '20px' }}>
             Abrir PDF en Ventana
           </Button>
-          {processingProgress > 0 && processingProgress < 100 && (
-            <p>Procesando archivo: {processingProgress}%</p>
-          )}
         </div>
       </div>
       <footer>
-        <Button variant="contained" color="primary" onClick={handleSaveChanges}>
-          Guardar Cambios
-        </Button>
+        <Button variant="contained" color="primary">Guardar Cambios</Button>
         <Button variant="contained" color="secondary">Exportar Reporte</Button>
         <Button variant="contained" color="error">Cancelar</Button>
       </footer>
+
       <MinimizedWindowsBar />
+
       <div className="floating-windows-container">
         <FloatingWindow
-          title="Resultados del Archivo Nuevo"
+          title="Datos del Archivo Nuevo"
           isOpen={isNewWindowOpen}
           onClose={() => setIsNewWindowOpen(false)}
-          onMinimize={() => handleMinimizeWindow("Resultados del Archivo Nuevo")}
+          onMinimize={() => handleMinimizeWindow("Nuevo")}
         >
-          {newData && newData.length > 0 ? (
-            <DataGrid
-              rows={differencesNew.map((row, index) => ({
-                id: index,
-                ...row.data.reduce((acc: any, cell: any, cellIndex: number) => ({
-                  ...acc,
-                  [`column${cellIndex}`]: { value: cell.value, status: cell.status }
-                }), {})
-              }))}
-              columns={newData[0].map((header: any, index: number) => ({
-                field: `column${index}`,
-                headerName: `Columna ${index + 1}`,
-                width: 150,
-                renderCell: renderCell,
-                editable: true,
-              }))}
-              pageSize={10}
-              rowsPerPageOptions={[10, 25, 50]}
-              checkboxSelection
-            />
+          {newData ? (
+            <div style={{ height: 400, width: '100%' }}>
+              <EditableExcelTable data={newData} onDataChange={(updated) => setNewData(updated)} />
+            </div>
           ) : (
             <p>No hay datos para mostrar</p>
           )}
         </FloatingWindow>
-        <FloatingWindow
-          title="Resultados del Archivo Base"
-          isOpen={isBaseWindowOpen}
-          onClose={() => setIsBaseWindowOpen(false)}
-          onMinimize={() => handleMinimizeWindow("Resultados del Archivo Base")}
-        >
-          {differencesBase && differencesBase.length > 0 ? (
-            <DataGrid
-              rows={differencesBase.map((row, index) => ({
-                id: index,
-                ...row.data.reduce((acc: any, cell: any, cellIndex: number) => ({
-                  ...acc,
-                  [`column${cellIndex}`]: { value: cell.value, status: cell.status }
-                }), {})
-              }))}
-              columns={baseData[0].map((header: any, index: number) => ({
-                field: `column${index}`,
-                headerName: header,
-                width: 150,
-                editable: true,
-                renderCell: renderCell,
-              }))}
-              pageSize={10}
-              rowsPerPageOptions={[10, 25, 50]}
-              checkboxSelection
-            />
-          ) : (
-            <p>No hay datos para mostrar</p>
-          )}
-        </FloatingWindow>
-        <FloatingWindow
-          title="Editar Celda"
-          isOpen={isEditWindowOpen}
-          onClose={() => setIsEditWindowOpen(false)}
-          onMinimize={() => handleMinimizeWindow("Editar Celda")}
-        >
-          <div>
-            <h3>Editar Valor de la Celda</h3>
-            <input
-              type="text"
-              value={editedValue}
-              onChange={(e) => setEditedValue(e.target.value)}
-            />
-            <Button variant="contained" color="primary" onClick={handleEditSave}>
-              Guardar
-            </Button>
-            <Button variant="contained" color="secondary" onClick={() => setIsEditWindowOpen(false)}>
-              Cancelar
-            </Button>
-          </div>
-        </FloatingWindow>
+
         <FloatingWindow
           title="Visor de PDF"
           isOpen={isPdfWindowOpen}
-          onClose={() => setIsPdfWindowOpen(false)}
-          onMinimize={() => handleMinimizeWindow("Visor de PDF")}
+          onClose={handleClosePdfWindow}
+          onMinimize={() => handleMinimizeWindow("PDF")}
         >
           <canvas ref={canvasRef} />
         </FloatingWindow>
+
         <FloatingWindow
           title="Vista Previa Completa del Archivo"
           isOpen={isPreviewWindowOpen}
           onClose={() => setIsPreviewWindowOpen(false)}
-          onMinimize={() => handleMinimizeWindow("Vista Previa Completa del Archivo")}
+          onMinimize={() => handleMinimizeWindow("Vista Previa")}
         >
           {previewData ? (
-            <TableContainer component={Paper}>
-              <Table sx={{ minWidth: 650 }} aria-label="complete preview table">
-                <TableHead>
-                  <TableRow>
-                    {previewData[0].map((header, index) => (
-                      <TableCell key={index}>{header}</TableCell>
-                    ))}
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {previewData.slice(1).map((row, rowIndex) => (
-                    <TableRow key={rowIndex}>
-                      {row.map((cell, cellIndex) => (
-                        <TableCell key={cellIndex}>{cell}</TableCell>
-                      ))}
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
+            <div style={{ padding: '10px' }}>
+              <EditableExcelTable data={previewData} onDataChange={(updated) => setPreviewData(updated)} />
+            </div>
           ) : (
             <p>No hay datos para mostrar</p>
           )}
         </FloatingWindow>
       </div>
+
+      <DataModal
+        open={modalOpen}
+        title="Archivo Nuevo (Modificado)"
+        onClose={() => setModalOpen(false)}
+        data={<EditableExcelTable data={modalData} onDataChange={(updated) => setModalData(updated)} />}
+      />
     </div>
   );
 }
