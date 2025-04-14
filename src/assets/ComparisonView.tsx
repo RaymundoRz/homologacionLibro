@@ -214,6 +214,59 @@ function reorderAll(worksheet: any[][]): any[][] {
   return result;
 }
 
+function formatVehicleData(data: any[][]): any[][] {
+  const formattedData = [];
+  let currentModel = '';
+  
+  // 1. Conservar cabeceras originales
+  if (data.length > 0) {
+    formattedData.push(data[0]);
+  }
+
+  for (let i = 1; i < data.length; i++) {
+    const row = [...data[i]]; // Copia de la fila
+    const rowType = Number(row[0]) || 0;
+
+    // 2. Procesar filas tipo 2 (modelo principal)
+    if (rowType === 2) {
+      currentModel = row[2] || '';
+      formattedData.push(row);
+    }
+    // 3. Procesar filas tipo 3 (año + condición)
+    else if (rowType === 3) {
+      const versionText = row[2] || '';
+      
+      // Extraer año y condición
+      const yearMatch = versionText.match(/(20\d{2})/);
+      const conditionMatch = versionText.match(/Unidades (Nuevas|Usadas)/);
+      
+      const year = yearMatch ? yearMatch[1] : '';
+      const condition = conditionMatch ? `Unidades ${conditionMatch[1]}` : '';
+      
+      // Formatear según requisitos
+      row[2] = `${year} ${currentModel}`.trim(); // Versiones: "2025 TLX"
+      row[3] = condition; // Preciobase: "Unidades Nuevas" o vacío
+      row[4] = ''; // Limpiar Preciobase2
+      
+      formattedData.push(row);
+    }
+    // 4. Procesar filas tipo 4 (versiones)
+    else if (rowType === 4) {
+      // Limpiar "Lista" si existe en precios
+      if (typeof row[3] === 'string') {
+        row[3] = row[3].replace('Lista', '').trim();
+      }
+      formattedData.push(row);
+    }
+    // 5. Otras filas (ceros, etc.)
+    else {
+      formattedData.push(row);
+    }
+  }
+  
+  return formattedData;
+}
+
 
 /**
  * Función processNewData:
@@ -260,7 +313,10 @@ function processNewData(worksheet: any[][]): any[][] {
     }
   }
 
-  return result;
+  // 5. Aplicar el nuevo formateo para años, modelos y precios
+  const formattedData = formatVehicleData(result);
+
+  return formattedData;
 }
 
 
@@ -342,74 +398,6 @@ function ComparisonView() {
     }
   };
 
-  // Dentro del componente ComparisonView...
-
-const handleExportExcel = () => {
-    // 1. Verifica que haya datos para exportar
-    if (!newData || newData.length === 0) {
-      alert("No hay datos procesados para exportar.");
-      return;
-    }
-
-    console.log("Iniciando exportación a Excel...");
-
-    try {
-        // 2. Identifica el índice de la columna "Temp" (insensible a mayúsculas/minúsculas)
-        // Asegúrate de que newData[0] exista y sea un array
-        if (!newData[0] || !Array.isArray(newData[0])) {
-             throw new Error("La cabecera de los datos no es válida.");
-        }
-        const header = newData[0].map(cell => String(cell).toLowerCase()); // Convertir a string y minúsculas
-        const tempColIndex = header.findIndex(col => col === 'temp');
-
-        // 3. Crea una nueva matriz de datos EXCLUYENDO la columna "Temp"
-        let dataToExport: any[][];
-        if (tempColIndex !== -1) {
-            console.log(`Excluyendo columna 'Temp' en el índice: ${tempColIndex}`);
-            // Mapea cada fila y filtra la celda en el índice tempColIndex
-            dataToExport = newData.map(row =>
-                row.filter((_, colIndex) => colIndex !== tempColIndex)
-            );
-        } else {
-            console.warn("La columna 'Temp' no se encontró. Exportando todos los datos.");
-            // Si no se encuentra 'Temp', exporta todo (o podrías lanzar un error)
-            // Hacemos una copia para no arriesgar la mutación accidental
-            dataToExport = JSON.parse(JSON.stringify(newData));
-        }
-
-        // 4. Crea la hoja de cálculo a partir de la matriz filtrada
-        const worksheet = XLSX.utils.aoa_to_sheet(dataToExport);
-
-        // --- Opcional: Ajustar anchos de columna ---
-        // Esto es un ejemplo básico, puedes ajustar los valores
-        const colWidths = dataToExport[0].map((_, i) => {
-             // Asigna anchos diferentes basados en el índice (A, B, C...)
-             if (i === 0) return { wch: 8 };  // Tipo
-             if (i === 1) return { wch: 15 }; // Clase
-             if (i === 2) return { wch: 40 }; // Versiones
-             if (i === 3) return { wch: 15 }; // Preciobase
-             if (i === 4) return { wch: 15 }; // Preciobase2
-             return { wch: 12 }; // Ancho por defecto para otras columnas
-        });
-        worksheet['!cols'] = colWidths;
-        // --- Fin Opcional ---
-
-
-        // 5. Crea el libro de trabajo y añade la hoja
-        const workbook = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(workbook, worksheet, "Datos Procesados"); // Nombre de la hoja
-
-        // 6. Genera el archivo y dispara la descarga
-        const fileName = "DatosProcesadosSinTemp.xlsx"; // Nombre del archivo a descargar
-        XLSX.writeFile(workbook, fileName);
-
-        console.log(`Archivo "${fileName}" generado para descarga.`);
-
-    } catch (error) {
-        console.error("Error al exportar a Excel:", error);
-        alert("Ocurrió un error al generar el archivo Excel.");
-    }
-};
 
   // Función para renderizar el PDF
   const renderPdf = () => {
