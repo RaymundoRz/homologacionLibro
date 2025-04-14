@@ -1,111 +1,120 @@
-// src/components/EditableExcelTable.tsx
-import React, { useState, useEffect } from 'react';
-import { DataGrid, GridColDef, GridCellEditCommitParams } from '@mui/x-data-grid';
-import { Button, Box } from '@mui/material';
+import React from 'react';
+import { 
+  Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, 
+  Typography, Box 
+} from '@mui/material';
+import { Warning as WarningIcon } from '@mui/icons-material';
 
 interface EditableExcelTableProps {
-  data: any[]; // Se espera un array de arrays, donde data[0] es la cabecera
-  onDataChange?: (newData: any[]) => void;
+  data: any[][];
+  onDataChange: (updatedData: any[][]) => void;
+  validationErrors?: { rowIndex: number; messages: string[] }[];
 }
 
-const EditableExcelTable: React.FC<EditableExcelTableProps> = ({ data, onDataChange }) => {
-  // Creamos el estado para la data editable
-  const [rows, setRows] = useState<any[]>([]);
+const EditableExcelTable: React.FC<EditableExcelTableProps> = ({ 
+  data, 
+  onDataChange, 
+  validationErrors = [] 
+}) => {
+  if (!data || data.length === 0) return <p>No hay datos para mostrar</p>;
 
-  // Configuramos las columnas basándonos en la primera fila (cabecera)
-  const [columns, setColumns] = useState<GridColDef[]>([]);
+  // Obtener los índices de las columnas clave
+  const header = data[0].map(cell => cell.toString().toLowerCase());
+  const tipoIndex = header.findIndex(col => col.includes('tipo'));
+  const precioBaseIndex = header.findIndex(col => col.includes('preciobase'));
+  const precioBase2Index = header.findIndex(col => col.includes('preciobase2'));
 
-  // Al inicializar o cambiar "data", actualizamos filas y columnas
-  useEffect(() => {
-    if (!data || data.length === 0) return;
-
-    // Construimos columnas a partir de la cabecera
-    const header = data[0];
-    const cols: GridColDef[] = header.map((colName: string, index: number) => ({
-      field: `column${index}`,
-      headerName: colName || `Columna ${index + 1}`,
-      width: 150,
-      editable: true,
-    }));
-    setColumns(cols);
-
-    // Construimos las filas a partir de los datos (excluyendo la cabecera)
-    const newRows = data.slice(1).map((row, rowIndex) => {
-      const rowObject: any = { id: rowIndex };
-      row.forEach((cell: any, colIndex: number) => {
-        rowObject[`column${colIndex}`] = cell;
-      });
-      return rowObject;
-    });
-    setRows(newRows);
-  }, [data]);
-
-  // Manejador para la edición de celdas
-  const handleCellEditCommit = (params: GridCellEditCommitParams) => {
-    const updatedRows = rows.map(row => {
-      if (row.id === params.id) {
-        return { ...row, [params.field]: params.value };
-      }
-      return row;
-    });
-    setRows(updatedRows);
-    if (onDataChange) {
-      // Reconstruir el array de arrays: la cabecera se conserva
-      const updatedData = [columns.map(col => col.headerName), ...updatedRows.map(row =>
-        columns.map(col => row[col.field])
-      )];
-      onDataChange(updatedData);
-    }
-  };
-
-  // Función para agregar una nueva fila (con celdas vacías)
-  const handleAddRow = () => {
-    const newRow: any = { id: rows.length };
-    columns.forEach(col => {
-      newRow[col.field] = '';
-    });
-    const updatedRows = [...rows, newRow];
-    setRows(updatedRows);
-    if (onDataChange) {
-      const updatedData = [columns.map(col => col.headerName), ...updatedRows.map(row =>
-        columns.map(col => row[col.field])
-      )];
-      onDataChange(updatedData);
-    }
-  };
-
-  // Función para eliminar la fila seleccionada (suponiendo que se selecciona una fila)
-  const handleDeleteRow = () => {
-    // En este ejemplo, eliminamos la última fila como muestra
-    if (rows.length === 0) return;
-    const updatedRows = rows.slice(0, rows.length - 1);
-    // Reasignamos IDs para que sean consecutivos
-    const reassignedRows = updatedRows.map((row, index) => ({ ...row, id: index }));
-    setRows(reassignedRows);
-    if (onDataChange) {
-      const updatedData = [columns.map(col => col.headerName), ...reassignedRows.map(row =>
-        columns.map(col => row[col.field])
-      )];
-      onDataChange(updatedData);
-    }
+  const handleCellChange = (rowIndex: number, colIndex: number, value: any) => {
+    const updatedData = [...data];
+    updatedData[rowIndex][colIndex] = value;
+    onDataChange(updatedData);
   };
 
   return (
-    <Box>
-      <Box mb={2} display="flex" gap={2}>
-        <Button variant="contained" onClick={handleAddRow}>Agregar Fila</Button>
-        <Button variant="contained" color="error" onClick={handleDeleteRow}>Eliminar Última Fila</Button>
-      </Box>
-      <div style={{ height: 400, width: '100%' }}>
-        <DataGrid
-          rows={rows}
-          columns={columns}
-          pageSize={10}
-          rowsPerPageOptions={[10, 25, 50]}
-          onCellEditCommit={handleCellEditCommit}
-        />
-      </div>
-    </Box>
+    <TableContainer component={Paper} style={{ maxHeight: 400, overflow: 'auto' }}>
+      <Table stickyHeader>
+        <TableHead>
+          <TableRow>
+            {data[0].map((cell, colIndex) => (
+              <TableCell key={colIndex}>{cell}</TableCell>
+            ))}
+            <TableCell>Validación</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {data.slice(1).map((row, rowIndex) => {
+            const actualRowIndex = rowIndex + 1; // porque la cabecera es fila 0
+            // Filtrar los errores que correspondan a esta fila.
+            const rowErrors = validationErrors
+              .filter(e => e.rowIndex === actualRowIndex)
+              .flatMap(e => e.messages);
+            // Determina si esta fila es de versiones (tipo 4)
+            const isVersionRow = tipoIndex !== -1 && parseInt(row[tipoIndex]) === 4;
+
+            return (
+              <TableRow key={actualRowIndex}>
+                {row.map((cell, colIndex) => {
+                  // Define si tiene error basado en la validación
+                  let hasError = false;
+                  const colName = header[colIndex];
+                  if (isVersionRow) {
+                    // Si la columna es "preciobase" y está vacía, se marca error
+                    if (colName.includes('preciobase') && (cell === '' || cell == null)) {
+                      hasError = true;
+                    }
+                    // Si es "preciobase2", comparamos con el precio base
+                    if (colName.includes('preciobase2') && precioBaseIndex !== -1) {
+                      const precioBase = parseFloat(row[precioBaseIndex]);
+                      const precioBase2 = parseFloat(cell);
+                      if (!isNaN(precioBase) && !isNaN(precioBase2) && precioBase2 >= precioBase) {
+                        hasError = true;
+                      }
+                    }
+                  }
+                  return (
+                    <TableCell
+                      key={colIndex}
+                      style={{
+                        backgroundColor: hasError ? '#ffebee' : 'inherit',
+                        padding: '8px'
+                      }}
+                    >
+                      <input
+                        value={cell === null || cell === undefined ? '' : cell}
+                        onChange={(e) => handleCellChange(actualRowIndex, colIndex, e.target.value)}
+                        style={{
+                          border: hasError ? '2px solid red' : '1px solid #ddd',
+                          width: '100%',
+                          padding: '4px',
+                          boxSizing: 'border-box'
+                        }}
+                      />
+                    </TableCell>
+                  );
+                })}
+                {/* Celda de Validación */}
+                <TableCell
+                  style={{
+                    backgroundColor: rowErrors.length > 0 ? '#fff8e1' : 'inherit',
+                    color: 'red',
+                    padding: '8px'
+                  }}
+                >
+                  {rowErrors.length > 0 ? (
+                    <Box display="flex" alignItems="center">
+                      <WarningIcon color="error" style={{ marginRight: 8 }} />
+                      <div style={{ fontSize: '0.8rem' }}>
+                        {rowErrors.join('; ')}
+                      </div>
+                    </Box>
+                  ) : null}
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </TableContainer>
   );
 };
 

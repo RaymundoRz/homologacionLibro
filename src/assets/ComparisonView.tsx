@@ -32,6 +32,7 @@ function parseYearAndNote(text: string): { year: number; note: string } {
   return { year, note };
 }
 
+
 /**
  * getNotePriority:
  * Devuelve un número menor para “Unidades Nuevas”, un número intermedio para “Unidades Usadas”,
@@ -46,66 +47,46 @@ function getNotePriority(note: string): number {
 }
 
 
-/**
- * Función adjustTipoColumn:
- * Inserta filas con 0 según la regla:
- * - Para tipo 1: se inserta un 0 antes y después.
- * - Para tipo 2: se requiere que exista un 0 justo antes.
- * Las demás filas se dejan sin modificar.
- */
 function adjustTipoColumn(rows: any[][]): any[][] {
-  const adjusted: any[][] = [];
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i];
-    const tipo = Number(row[0]);
-
-    if (isNaN(tipo)) {
-      adjusted.push(row);
-      continue;
+  // Filtramos las filas 1 y 3 si son ceros
+  const filteredRows = rows.filter((row, index) => {
+    // Si es la fila 1 o 3 (después del header) y empieza con 0, la eliminamos
+    if (index === 1 || index === 3) {
+      return row[0] !== 0 && row[0] !== '0';
     }
+    return true;
+  });
 
+  // Luego aplicamos las reglas de inserción de ceros
+  const result: any[][] = [];
+  for (let i = 0; i < filteredRows.length; i++) {
+    const row = filteredRows[i];
+    const tipo = Number(row[0]);
+    
     if (tipo === 1) {
-      // ... (lógica tipo 1 sin cambios) ...
-      if (adjusted.length === 0 || Number(adjusted[adjusted.length - 1][0]) !== 0) {
-        adjusted.push([0, ...new Array(row.length - 1).fill('')]);
+      // Insertar 0 antes y después de tipo 1
+      if (result.length === 0 || Number(result[result.length - 1][0]) !== 0) {
+        result.push([0, ...Array(row.length - 1).fill('')]);
       }
-      adjusted.push(row);
-      if (i === rows.length - 1 || Number(rows[i + 1]?.[0]) !== 0) { // Added optional chaining for safety
-        adjusted.push([0, ...new Array(row.length - 1).fill('')]);
+      result.push(row);
+      if (i === filteredRows.length - 1 || Number(filteredRows[i + 1]?.[0]) !== 0) {
+        result.push([0, ...Array(row.length - 1).fill('')]);
       }
     } else if (tipo === 2) {
-      // *** INICIO DEBUG ***
-      console.log(`--- Fila ${i} ---`); // Identificador de fila (índice base 0)
-      console.log("Procesando fila TIPO 2:", row);
-      if (adjusted.length > 0) {
-          const precedingRowInAdjusted = adjusted[adjusted.length - 1];
-          const precedingValue = precedingRowInAdjusted[0];
-          const precedingType = typeof precedingValue;
-          const precedingNumber = Number(precedingValue);
-          console.log("Fila ANTERIOR en 'adjusted':", precedingRowInAdjusted);
-          console.log(`  Valor anterior [0]: >>${precedingValue}<< | Tipo: ${precedingType} | Convertido a número: ${precedingNumber}`);
-          console.log(`  Condición a evaluar: adjusted.length === 0 (${adjusted.length === 0}) || Number(precedingValue) !== 0 (${precedingNumber !== 0})`);
-      } else {
-          console.log("Lista 'adjusted' está vacía.");
-          console.log(`  Condición a evaluar: adjusted.length === 0 (true)`);
+      // Insertar 0 antes de tipo 2
+      if (result.length === 0 || Number(result[result.length - 1][0]) !== 0) {
+        result.push([0, ...Array(row.length - 1).fill('')]);
       }
-      // *** FIN DEBUG ***
-
-      // La condición original:
-      if (adjusted.length === 0 || Number(adjusted[adjusted.length - 1]?.[0]) !== 0) { // Added optional chaining
-        console.log(">>> CONDICIÓN CUMPLIDA (true): Añadiendo fila de ceros.");
-        adjusted.push([0, ...new Array(row.length - 1).fill('')]);
-      } else {
-        console.log(">>> CONDICIÓN NO CUMPLIDA (false): NO se añade fila de ceros.");
-      }
-      adjusted.push(row);
-
+      result.push(row);
     } else {
-      adjusted.push(row);
+      result.push(row);
     }
   }
-  return adjusted;
+
+  return result;
 }
+
+
 
 
 /**
@@ -241,20 +222,45 @@ function reorderAll(worksheet: any[][]): any[][] {
 function processNewData(worksheet: any[][]): any[][] {
   if (!worksheet || worksheet.length === 0) return [];
 
-  // 1. Separa cabecera
-  const header = worksheet[0];
-  const dataRows = worksheet.slice(1);
+  // 1. Clonamos el array para no modificar el original
+  const newData = JSON.parse(JSON.stringify(worksheet));
 
-  // 2. Ajustar la columna Tipo (inserta ceros)
-  const adjustedTipo = adjustTipoColumn(dataRows);
+  // 2. Eliminamos específicamente las filas 1 y 3 (A2 y A4) si son ceros
+  const rowsToCheck = [1, 3];
+  for (let i = rowsToCheck.length - 1; i >= 0; i--) {
+    const rowIndex = rowsToCheck[i];
+    if (newData[rowIndex] && (newData[rowIndex][0] === 0 || newData[rowIndex][0] === '0')) {
+      newData.splice(rowIndex, 1);
+    }
+  }
 
-  // 3. Reconstruir con cabecera
-  const adjustedWorksheet = [header, ...adjustedTipo];
+  // 3. Identificamos y marcamos el primer 2 para NO modificarlo
+  let firstTwoIndex = -1;
+  for (let i = 0; i < newData.length; i++) {
+    if (newData[i][0] === 2 || newData[i][0] === '2') {
+      firstTwoIndex = i;
+      break;
+    }
+  }
 
-  // 4. Llamar a reorderAll para ordenar por años y notas
-  const reordered = reorderAll(adjustedWorksheet);
+  // 4. Aplicamos reglas a todos los 2 excepto al primero
+  const result: any[][] = [];
+  for (let i = 0; i < newData.length; i++) {
+    const row = newData[i];
+    const tipo = Number(row[0]) || 0;
 
-  return reordered;
+    if ((tipo === 2 || row[0] === '2') && i !== firstTwoIndex) {
+      // Insertar 0 antes de tipo 2 (excepto para el primer 2)
+      if (result.length === 0 || Number(result[result.length - 1][0]) !== 0) {
+        result.push([0, ...Array(row.length - 1).fill('')]);
+      }
+      result.push(row);
+    } else {
+      result.push(row);
+    }
+  }
+
+  return result;
 }
 
 
@@ -335,6 +341,75 @@ function ComparisonView() {
       reader.readAsBinaryString(file);
     }
   };
+
+  // Dentro del componente ComparisonView...
+
+const handleExportExcel = () => {
+    // 1. Verifica que haya datos para exportar
+    if (!newData || newData.length === 0) {
+      alert("No hay datos procesados para exportar.");
+      return;
+    }
+
+    console.log("Iniciando exportación a Excel...");
+
+    try {
+        // 2. Identifica el índice de la columna "Temp" (insensible a mayúsculas/minúsculas)
+        // Asegúrate de que newData[0] exista y sea un array
+        if (!newData[0] || !Array.isArray(newData[0])) {
+             throw new Error("La cabecera de los datos no es válida.");
+        }
+        const header = newData[0].map(cell => String(cell).toLowerCase()); // Convertir a string y minúsculas
+        const tempColIndex = header.findIndex(col => col === 'temp');
+
+        // 3. Crea una nueva matriz de datos EXCLUYENDO la columna "Temp"
+        let dataToExport: any[][];
+        if (tempColIndex !== -1) {
+            console.log(`Excluyendo columna 'Temp' en el índice: ${tempColIndex}`);
+            // Mapea cada fila y filtra la celda en el índice tempColIndex
+            dataToExport = newData.map(row =>
+                row.filter((_, colIndex) => colIndex !== tempColIndex)
+            );
+        } else {
+            console.warn("La columna 'Temp' no se encontró. Exportando todos los datos.");
+            // Si no se encuentra 'Temp', exporta todo (o podrías lanzar un error)
+            // Hacemos una copia para no arriesgar la mutación accidental
+            dataToExport = JSON.parse(JSON.stringify(newData));
+        }
+
+        // 4. Crea la hoja de cálculo a partir de la matriz filtrada
+        const worksheet = XLSX.utils.aoa_to_sheet(dataToExport);
+
+        // --- Opcional: Ajustar anchos de columna ---
+        // Esto es un ejemplo básico, puedes ajustar los valores
+        const colWidths = dataToExport[0].map((_, i) => {
+             // Asigna anchos diferentes basados en el índice (A, B, C...)
+             if (i === 0) return { wch: 8 };  // Tipo
+             if (i === 1) return { wch: 15 }; // Clase
+             if (i === 2) return { wch: 40 }; // Versiones
+             if (i === 3) return { wch: 15 }; // Preciobase
+             if (i === 4) return { wch: 15 }; // Preciobase2
+             return { wch: 12 }; // Ancho por defecto para otras columnas
+        });
+        worksheet['!cols'] = colWidths;
+        // --- Fin Opcional ---
+
+
+        // 5. Crea el libro de trabajo y añade la hoja
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, "Datos Procesados"); // Nombre de la hoja
+
+        // 6. Genera el archivo y dispara la descarga
+        const fileName = "DatosProcesadosSinTemp.xlsx"; // Nombre del archivo a descargar
+        XLSX.writeFile(workbook, fileName);
+
+        console.log(`Archivo "${fileName}" generado para descarga.`);
+
+    } catch (error) {
+        console.error("Error al exportar a Excel:", error);
+        alert("Ocurrió un error al generar el archivo Excel.");
+    }
+};
 
   // Función para renderizar el PDF
   const renderPdf = () => {
