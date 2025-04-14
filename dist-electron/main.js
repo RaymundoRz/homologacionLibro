@@ -800,7 +800,7 @@ function createWindow() {
     }
   });
   if (isDev) {
-    win.loadURL("http://localhost:5175");
+    win.loadURL("http://localhost:5173");
   } else {
     win.loadFile(path$1.join(__dirname, "../dist/index.html"));
   }

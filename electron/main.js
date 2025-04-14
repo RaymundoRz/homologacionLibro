@@ -32,7 +32,7 @@ function createWindow() {
   if (isDev) {
     // Carga la URL del dev server de Vite
     // Asegúrate de que coincida con el puerto que Vite está usando
-    win.loadURL('http://localhost:5175');
+    win.loadURL('http://localhost:5173');
   } else {
     // Carga el archivo HTML compilado (build de producción)
     win.loadFile(path.join(__dirname, '../dist/index.html'));

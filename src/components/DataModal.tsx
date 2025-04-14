@@ -1,47 +1,82 @@
-// src/components/DataModal.tsx
 import React from 'react';
-import { Modal, Box, Typography, IconButton } from '@mui/material';
+import { Paper, IconButton, Typography, Box } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
+import Draggable from 'react-draggable';
 
 interface DataModalProps {
   open: boolean;
   title: string;
   onClose: () => void;
   data: React.ReactNode;
+  modalStyle?: React.CSSProperties;
+  onFocus?: () => void;
 }
 
-const style = {
-  position: 'absolute' as 'absolute',
-  top: '50%',
-  left: '50%',
-  transform: 'translate(-50%, -50%)',
-  width: '80%',
-  maxHeight: '80vh',
-  bgcolor: '#ffffff',
-  border: '2px solid #1976d2',
-  borderRadius: '8px',
-  boxShadow: 24,
-  p: 4,
-  overflowY: 'auto',
-};
+const DataModal: React.FC<DataModalProps> = ({ 
+  open, 
+  title, 
+  onClose, 
+  data, 
+  modalStyle,
+  onFocus
+}) => {
+  if (!open) return null;
 
-const DataModal: React.FC<DataModalProps> = ({ open, title, onClose, data }) => {
+  const combinedStyle: React.CSSProperties = {
+    position: 'fixed',
+    width: '45%',
+    maxHeight: '80vh',
+    backgroundColor: '#ffffff',
+    border: '2px solid #1976d2',
+    borderRadius: '8px',
+    boxShadow: '0px 11px 15px -7px rgba(0,0,0,0.4)',
+    overflow: 'hidden',
+    display: 'flex',
+    flexDirection: 'column',
+    zIndex: modalStyle?.zIndex || 1300,
+    ...modalStyle
+  };
+
   return (
-    <Modal open={open} onClose={onClose} aria-labelledby="data-modal-title">
-      <Box sx={style}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Typography id="data-modal-title" variant="h6">
-            {title}
-          </Typography>
-          <IconButton onClick={onClose}>
+    <Draggable handle="#draggable-handle" cancel=".MuiButton-root, .MuiInputBase-root">
+      <Paper 
+        style={combinedStyle}
+        onMouseDown={onFocus}
+        onClick={onFocus}
+      >
+        <Box 
+          id="draggable-handle"
+          sx={{
+            cursor: 'move',
+            padding: '8px 16px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            backgroundColor: '#1976d2',
+            color: 'white'
+          }}
+        >
+          <Typography variant="h6">{title}</Typography>
+          <IconButton 
+            onClick={onClose} 
+            size="small"
+            sx={{ color: 'white' }}
+          >
             <CloseIcon />
           </IconButton>
         </Box>
-        <div style={{ padding: '10px', background: '#f9f9f9', borderRadius: '4px' }}>
+        <Box sx={{ 
+          padding: 2,
+          overflowY: 'auto',
+          flex: 1,
+          '&:focus': {
+            outline: 'none'
+          }
+        }}>
           {data}
-        </div>
-      </Box>
-    </Modal>
+        </Box>
+      </Paper>
+    </Draggable>
   );
 };
 

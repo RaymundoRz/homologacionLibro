@@ -7,7 +7,8 @@ import pdfjsLib from "./pdfWorker";
 import FloatingWindow from "./FloatingWindow.jsx";
 import DataModal from '../components/DataModal';
 import EditableExcelTable from '../components/EditableExcelTable';
-
+import { ComparisonTool } from '../components/ComparisonTool.js';
+import { ComparisonViewer } from '../components/ComparisonViewer.js';
 
 
 /* ============================================================
@@ -337,6 +338,19 @@ function ComparisonView() {
   const [modalOpen, setModalOpen] = useState(false);
   const [modalData, setModalData] = useState<any>(null);
 
+  const [currentData, setCurrentData] = useState<any[][]>([]);
+  const [comparisonResult, setComparisonResult] = useState<any[][]>([]);
+  const [isComparisonModalOpen, setIsComparisonModalOpen] = useState(false);
+
+  // Estados para z-index de cada modal (inicialmente asignados)
+  const [zIndices, setZIndices] = useState({ archivo: 1300, comparacion: 1301 });
+
+  // Función para actualizar z-index según cuál modal se hace clic.
+  const bringArchivoFront = () => setZIndices({ archivo: 1400, comparacion: 1300 });
+  const bringComparacionFront = () => setZIndices({ archivo: 1300, comparacion: 1400 });
+
+
+
   // Ventanas flotantes
   const handleClosePdfWindow = () => setIsPdfWindowOpen(false);
   const handleClosePreviewWindow = () => setIsPreviewWindowOpen(false);
@@ -369,30 +383,57 @@ function ComparisonView() {
   }, [isPdfWindowOpen, pdfFile]);
 
   // Función para manejar la carga de archivos (Excel y PDF)
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'new' | 'pdf') => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'new' | 'pdf' | 'base') => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     if (type === 'pdf') {
       setPdfFile(file);
-    } else if (type === 'new') {
+    } else if (type === 'new' || type === 'base') {
       const reader = new FileReader();
       reader.onload = async (event) => {
         const binaryStr = event.target?.result;
         if (typeof binaryStr !== 'string') return;
-        const workbook = XLSX.read(binaryStr, { type: 'binary' });
-        const sheetName = workbook.SheetNames[0];
-        const worksheet = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {
-          header: 1,
-          defval: '',
-          blankrows: true,
-        });
-        // Guarda la data original y de vista previa
-        setNewData(worksheet);
-        setPreviewData(worksheet);
-        // Guarda en SQLite vía IPC (asumiendo que window.api está configurado en preload)
-        await window.api.clearData('newData');
-        await window.api.addData('newData', worksheet);
+
+        try { // Añadido try-catch para manejo de errores de lectura de Excel
+          const workbook = XLSX.read(binaryStr, { type: 'binary' });
+          const sheetName = workbook.SheetNames[0];
+          const worksheet = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {
+            header: 1,
+            defval: '',
+            blankrows: true,
+          });
+
+          // --- Lógica específica por tipo ---
+          if (type === 'new') {
+            console.log("Cargando Archivo Nuevo...");
+            setNewData(worksheet);
+            setPreviewData(worksheet); // Actualizar vista previa también
+            setModalData(null); // Limpiar datos procesados anteriores
+            // Opcional: Guardar en SQLite (considera si es necesario guardar el crudo)
+            // await window.api.clearData('newData');
+            // await window.api.addData('newData', worksheet);
+            console.log("Archivo Nuevo cargado.");
+          } else if (type === 'base') {
+            console.log("Cargando Archivo Base...");
+            // <<< --- AQUÍ LA ACTUALIZACIÓN --- >>>
+            setCurrentData(worksheet); 
+            // <<< ----------------------------- >>>
+            console.log("Archivo Base cargado en currentData:", worksheet);
+            // Opcional: Guardar en SQLite si necesitas persistirlo
+            // await window.api.clearData('currentData');
+            // await window.api.addData('currentData', worksheet);
+          }
+          // --- Fin lógica específica ---
+
+        } catch (error) {
+           console.error("Error al leer el archivo Excel:", error);
+           alert("Hubo un error al leer el archivo Excel. Asegúrate de que el formato sea correcto y el archivo no esté corrupto.");
+        }
+      };
+      reader.onerror = (error) => {
+        console.error("Error al leer el archivo con FileReader:", error);
+        alert("Hubo un error al leer el archivo.");
       };
       reader.readAsBinaryString(file);
     }
@@ -434,6 +475,7 @@ function ComparisonView() {
     setNewData(modifiedData);
     setModalData(modifiedData);
     setModalOpen(true);
+    setIsComparisonModalOpen(true); // Abrir también el modal de comparación
     // Actualizar en SQLite vía IPC
     await window.api.clearData('newData');
     await window.api.addData('newData', modifiedData);
@@ -460,8 +502,19 @@ function ComparisonView() {
           <h3>Cargar Archivos</h3>
           <input type="file" accept=".xlsx, .xls" onChange={(e) => handleFileUpload(e, 'new')} />
           <p>Subir Archivo Nuevo</p>
+
+          {/* === NUEVO INPUT para Archivo Base === */}
+          <input 
+            type="file" 
+            accept=".xlsx, .xls" 
+            onChange={(e) => handleFileUpload(e, 'base')} // Usamos el mismo handler con tipo 'base'
+          />
+          <p>Subir Archivo Base (para Comparación)</p>
+          {/* === FIN NUEVO INPUT === */}
+
           <input type="file" accept=".pdf" onChange={(e) => handleFileUpload(e, 'pdf')} />
           <p>Subir PDF</p>
+          
           <Button variant="contained" onClick={handleApplyChanges} style={{ marginTop: '20px' }}>
             Aplicar Cambios (Archivo Nuevo)
           </Button>
@@ -471,6 +524,16 @@ function ComparisonView() {
           <Button variant="contained" onClick={() => setIsPdfWindowOpen(true)} style={{ marginTop: '20px' }}>
             Abrir PDF en Ventana
           </Button>
+          {/* Botón para abrir el modal de comparación */}
+          <Button 
+            variant="contained" 
+            onClick={() => setIsComparisonModalOpen(true)} 
+            style={{ marginTop: '20px' }}
+            // Deshabilitado si no hay datos base O no hay datos nuevos procesados
+            disabled={!currentData || currentData.length === 0 || !modalData} 
+          >
+            Abrir Comparación
+          </Button>
         </div>
       </div>
       <footer>
@@ -478,9 +541,9 @@ function ComparisonView() {
         <Button variant="contained" color="secondary">Exportar Reporte</Button>
         <Button variant="contained" color="error">Cancelar</Button>
       </footer>
-
+  
       <MinimizedWindowsBar />
-
+  
       <div className="floating-windows-container">
         <FloatingWindow
           title="Datos del Archivo Nuevo"
@@ -496,7 +559,7 @@ function ComparisonView() {
             <p>No hay datos para mostrar</p>
           )}
         </FloatingWindow>
-
+  
         <FloatingWindow
           title="Visor de PDF"
           isOpen={isPdfWindowOpen}
@@ -505,7 +568,7 @@ function ComparisonView() {
         >
           <canvas ref={canvasRef} />
         </FloatingWindow>
-
+  
         <FloatingWindow
           title="Vista Previa Completa del Archivo"
           isOpen={isPreviewWindowOpen}
@@ -521,12 +584,63 @@ function ComparisonView() {
           )}
         </FloatingWindow>
       </div>
-
+  
+      {/* Modal para Archivo Nuevo (Modificado) */}
       <DataModal
         open={modalOpen}
         title="Archivo Nuevo (Modificado)"
         onClose={() => setModalOpen(false)}
-        data={<EditableExcelTable data={modalData} onDataChange={(updated) => setModalData(updated)} />}
+        modalStyle={{
+          width: '45%',
+          top: '10%',
+          left: '10%',
+          transform: 'none',
+          zIndex: zIndices.archivo,
+        }}
+        onMouseDown={bringArchivoFront}
+        data={
+          <EditableExcelTable data={modalData} onDataChange={(updated) => setModalData(updated)} />
+        }
+      />
+  
+      {/* Modal para Comparación de Datos */}
+      <DataModal
+        open={isComparisonModalOpen}
+        title="Comparación de Datos"
+        onClose={() => setIsComparisonModalOpen(false)}
+        modalStyle={{
+          width: '60%', // Un poco más ancho para ver bien la tabla
+          height: '80vh',
+          top: '10%',
+          left: '20%', // Más centrado si es más ancho
+          transform: 'none',
+          zIndex: zIndices.comparacion,
+          display: 'flex', // Para que ComparisonViewer pueda ocupar el espacio
+          flexDirection: 'column',
+        }}
+        onMouseDown={bringComparacionFront} // Aplica aquí si DataModal lo soporta
+        data={
+          // O envuelve en un div con el evento si es necesario:
+          // <div onMouseDown={bringComparacionFront} style={{ flexGrow: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <> 
+              {currentData && currentData.length > 0 && modalData ? (
+                // Usa ComparisonViewer pasando los datos correctos
+                <ComparisonViewer 
+                  currentData={currentData}    // El archivo BASE cargado
+                  referenceData={modalData} // El archivo NUEVO procesado
+                />
+              ) : (
+                // Mensaje si falta algún dato
+                <p style={{ padding: '20px', textAlign: 'center' }}>
+                  Para comparar, por favor:
+                  <br />1. Carga un "Archivo Nuevo".
+                  <br />2. Haz clic en "Aplicar Cambios".
+                  <br />3. Carga un "Archivo Base".
+                </p>
+              )}
+            </>
+          // </div>
+        }
       />
     </div>
   );
