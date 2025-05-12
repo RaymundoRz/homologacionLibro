@@ -17,13 +17,17 @@ import { Warning as WarningIcon } from '@mui/icons-material';
 import * as XLSX from 'xlsx';
 
 interface EditableExcelTableProps {
+  headers: any[]; 
   data: any[][];
-  onDataChange: (updatedData: any[][]) => void;
+  allData: any[][];
+  onDataChange: (rows: any[][]) => void;
   validationErrors?: { rowIndex: number; messages: string[] }[];
 }
 
 const EditableExcelTable: React.FC<EditableExcelTableProps> = ({
+  headers,
   data,
+  allData,
   onDataChange,
   validationErrors = []
 }) => {
@@ -65,7 +69,7 @@ const EditableExcelTable: React.FC<EditableExcelTableProps> = ({
   };
 
   // Obtener los índices de las columnas clave
-  const header = data[0].map(cell => cell.toString().toLowerCase());
+  const header = headers.map(h => String(h).toLowerCase());
   const tipoIndex = header.findIndex(col => col.includes('tipo'));
   const precioBaseIndex = header.findIndex(col => col.includes('preciobase'));
   const precioBase2Index = header.findIndex(col => col.includes('preciobase2'));
@@ -78,42 +82,41 @@ const EditableExcelTable: React.FC<EditableExcelTableProps> = ({
 
   // Función para descargar el Excel final omitiendo la columna "Temp"
   const handleDownloadExcel = () => {
-    // Verificar que hay datos
-    if (!data || data.length === 0) {
-      alert('No hay datos para exportar');
-      return;
-    }
+    if (!allData.length) return alert('No hay datos para exportar');
+
+  // 1) Arma el header sin la columna “Temp”
+  const tempIndex = headers.findIndex(h => String(h).toLowerCase() === 'temp');
+  const exportHeaders = headers.filter((_, i) => i !== tempIndex);
+
+  // 2) Usa sólo las filas que tienes en “data” (que ya son la página activa)
+  //    y elimínales también la columna Temp
+  const exportRows = allData
+  .slice(1)                            // <— salta la fila de encabezado
+  .map(row => row.filter((_, i) => i !== tempIndex));
+
+  // 3) Construye el array AOA para XLSX: primero el header, luego las filas
+  const aoa = [
+    exportHeaders,  // cabecera UNA SÓLA vez
+    ...exportRows   // sólo las filas de datos
+  ];
   
-    // Crear copia profunda de los datos actuales
-    const dataToExport = JSON.parse(JSON.stringify(data));
-    
-    // Eliminar columna Temp si existe
-    const tempIndex = dataToExport[0].findIndex(
-      cell => String(cell).toLowerCase() === 'temp'
-    );
-    
-    const exportData = tempIndex !== -1
-      ? dataToExport.map(row => row.filter((_, i) => i !== tempIndex))
-      : dataToExport;
-  
-    // Crear el archivo Excel
-    const worksheet = XLSX.utils.aoa_to_sheet(exportData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Datos");
-    
-    // Construir el nombre del archivo utilizando la fecha actual
+
+  // 4) Crea y descarga el Excel
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Datos');
+
   const now = new Date();
   const monthNames = [
-    "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
-    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+    "Enero","Febrero","Marzo","Abril","Mayo","Junio",
+    "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"
   ];
   const month = monthNames[now.getMonth()];
-  const yearTwoDigits = now.getFullYear().toString().slice(-2);
-  const fileName = `Guía Libro Azul ${month} ${yearTwoDigits}.xls`;
+  const fileName = `Guía Libro Azul ${month} ${String(now.getFullYear()).slice(-2)}.xls`;
 
-  // Descargar
-  XLSX.writeFile(workbook, fileName);
-  };
+  XLSX.writeFile(wb, fileName);
+};
+
 
   return (
     <div onContextMenu={(e) => e.preventDefault()}>
@@ -121,15 +124,15 @@ const EditableExcelTable: React.FC<EditableExcelTableProps> = ({
         <Table stickyHeader>
           <TableHead>
             <TableRow>
-              {data[0].map((cell, colIndex) => (
-                <TableCell key={colIndex}>{cell}</TableCell>
+            {headers.map((h, colIndex) => (
+  <TableCell key={colIndex}>{h}</TableCell>
               ))}
               <TableCell>Validación</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
-            {data.slice(1).map((row, rowIndex) => {
-              const actualRowIndex = rowIndex + 1; // ya que la cabecera es la fila 0
+          {data.map((row, rowIndex) => {
+              const actualRowIndex = rowIndex; // ya que la cabecera es la fila 0
               // Filtrar los errores que correspondan a esta fila.
               const rowErrors = validationErrors
                 .filter(e => e.rowIndex === actualRowIndex)

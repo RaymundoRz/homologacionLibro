@@ -568,15 +568,14 @@ const allNewData = modalData || [];
 const newHeader = allNewData[0] || [];             // fila 0
 const newDataRows = allNewData.slice(1);           // resto de filas
 
-// 2) Calcula páginas
+// 2) Calcula cuántas páginas necesitas
 const newTotalPages = Math.ceil(newDataRows.length / PAGE_SIZE);
+
+// 3) Saca sólo las rows de la página actual
 const currentNewRows = newDataRows.slice(
   (newPage - 1) * PAGE_SIZE,
   newPage * PAGE_SIZE
 );
-
-// 3) Anteponer el encabezado a la página
-const newPageData = [newHeader, ...currentNewRows];
 
 
 // Datos paginados para modal "Comparación"
@@ -593,6 +592,24 @@ const currentCompareRows = compareDataRows.slice(
 const comparePageData = [compareHeader, ...currentCompareRows];
 
 
+// Reinyecta sólo las filas de la página dentro de modalData,
+// sin borrar el resto de páginas:
+const handleNewModalChange = (updatedPageRows: any[][]) => {
+  if (!modalData) return;
+  // 0: header, 1…: datos
+  const header = modalData[0];
+  const allRows = modalData.slice(1);
+  // posición donde empieza esta página
+  const start = (newPage - 1) * PAGE_SIZE;
+  // clona el array de datos
+  const cloned = [...allRows];
+  // pegas las filas editadas en su lugar
+  for (let i = 0; i < updatedPageRows.length; i++) {
+    cloned[start + i] = updatedPageRows[i];
+  }
+  // reconstruyes modalData con header + datos
+  setModalData([header, ...cloned]);
+};
 
 
 
@@ -706,13 +723,15 @@ const comparePageData = [compareHeader, ...currentCompareRows];
           {/* Área de la tabla con scroll */}
           <Box sx={{ flex: 1, overflowY: 'auto' }}>
             <EditableExcelTable
-              data={newPageData}
-              onDataChange={setModalData}
+              headers={newHeader}
+              data={currentNewRows}
+              allData={modalData!}
+              onDataChange={handleNewModalChange}
             />
           </Box>
 
           {/* Control de paginación */}
-          <Box sx={{ display: 'flex', justifyContent: 'center', my: 1 }}>
+          <Box sx={{ mt: 1, display: 'flex', justifyContent: 'center' }}>
             <Pagination
               count={newTotalPages}
               page={newPage}
@@ -733,13 +752,7 @@ const comparePageData = [compareHeader, ...currentCompareRows];
 {/* === MODAL DE COMPARACIÓN === */}
 <DataModal
   open={isComparisonModalOpen}
-  title={
-    isComparing
-      ? "Comparando..."
-      : comparisonError
-      ? "Error"
-      : "Comparación (Base vs Nuevo)"
-  }
+  title={ isComparing ? "Comparando..." : comparisonError ? "Error" : "Comparación (Base vs Nuevo)" }
   onClose={() => setIsComparisonModalOpen(false)}
   modalStyle={{
     width: '45%',
@@ -749,54 +762,48 @@ const comparePageData = [compareHeader, ...currentCompareRows];
     zIndex: zIndices.comparacion,
     display: 'flex',
     flexDirection: 'column',
-    height: '85vh'
+    height: '85vh',
+    overflow: 'hidden'          // que no haga scroll el modal entero
   }}
   onMouseDown={bringComparacionFront}
   data={
-    <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', p: 1 }}>
-      {/* Indicador de carga */}
+    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {isComparing && (
         <Box sx={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
           <CircularProgress />
           <Typography sx={{ ml: 2 }}>Procesando y comparando datos...</Typography>
         </Box>
       )}
+      {comparisonError && <Alert severity="error">{comparisonError}</Alert>}
 
-      {/* Mensaje de error */}
-      {comparisonError && (
-        <Alert severity="error">Error: {comparisonError}</Alert>
-      )}
-
-      {/* Tabla paginada de comparación */}
+      {/* CONTENEDOR PRINCIPAL DE LA TABLA */}
       {!isComparing && !comparisonError && comparisonDisplayData && comparisonDifferences && (
-        <>
-          <Box sx={{ flex: 1, overflowY: 'auto' }}>
+        <Box sx={{ flex: 1, overflowY: 'auto' /* scroll VERTICAL aquí */ }}>
+          {/* SOLO ESTA CAJA hace scroll horizontal */}
+          <Box sx={{ overflowX: 'auto', minWidth: 'max-content' }}>
             <ComparisonViewer
               displayData={comparePageData}
               differences={comparisonDifferences}
             />
           </Box>
-
-          <Box sx={{ display: 'flex', justifyContent: 'center', my: 1 }}>
-            <Pagination
-              count={compareTotalPages}
-              page={comparePage}
-              onChange={(_, p) => setComparePage(p)}
-              size="small"
-            />
-          </Box>
-        </>
+        </Box>
       )}
 
-      {/* Mensaje inicial si no hay datos */}
-      {!isComparing && !comparisonError && !comparisonDisplayData && (
-        <Box sx={{ p: 2 }}>
-          Resultados de la comparación aparecerán aquí.
+      {/* paginación */}
+      {!isComparing && !comparisonError && comparisonDisplayData && (
+        <Box sx={{ pt: 1, display: 'flex', justifyContent: 'center' }}>
+          <Pagination
+            count={compareTotalPages}
+            page={comparePage}
+            onChange={(_, p) => setComparePage(p)}
+            size="small"
+          />
         </Box>
       )}
     </Box>
   }
 />
+
 
 
     </div>
