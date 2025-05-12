@@ -221,19 +221,26 @@ const EditableExcelTable: React.FC<EditableExcelTableProps> = ({
       </Box>
       {/* Menú contextual para insertar fila */}
       <Menu
-        open={contextMenu !== null}
-        onClose={() => setContextMenu(null)}
-        anchorReference="anchorPosition"
-        anchorPosition={
-          contextMenu !== null
-            ? { top: contextMenu.mouseY, left: contextMenu.mouseX }
-            : undefined
-        }
-      >
-        <MenuItem onClick={() => contextMenu && handleAddRow(contextMenu.rowIndex)}>
-          Insertar fila aquí
-        </MenuItem>
-      </Menu>
+  open={Boolean(contextMenu)}
+  onClose={() => setContextMenu(null)}
+  anchorReference="anchorPosition"
+  anchorPosition={
+    contextMenu
+      ? { top: contextMenu.mouseY, left: contextMenu.mouseX }
+      : undefined
+  }
+  // 1) Este zIndex va en el propio Popover (no solo en el Paper)
+  sx={{ zIndex: 2000 }}
+  // 2) Y de paso dejas también el PaperProps por si acaso
+  PaperProps={{
+    style: { zIndex: 2000 }
+  }}
+>
+  <MenuItem onClick={() => contextMenu && handleAddRow(contextMenu.rowIndex)}>
+    Insertar fila aquí
+  </MenuItem>
+</Menu>
+
     </div>
   );
 };
