@@ -9,6 +9,7 @@ import FloatingWindow from "./FloatingWindow.jsx"; // Ajusta ruta si es necesari
 import DataModal from '../components/DataModal';
 import EditableExcelTable from '../components/EditableExcelTable'; 
 import { ComparisonViewer } from '../components/ComparisonViewer'; // El viewer simplificado
+import { Pagination } from '@mui/material';
 
 /* ============================================================
    LÓGICA DE TRANSFORMACIÓN (para Archivo Nuevo)
@@ -266,20 +267,6 @@ function formatVehicleDataForModal(data: any[][]): any[][] {
   return formattedData;
 }
 
-// Procesa datos crudos leídos de XLSX para el modal de vista previa
-function processDataForModal(worksheet: any[][]): any[][] {
-   if (!worksheet || worksheet.length === 0) return [];
-   try {
-       // Podrías añadir aquí más lógica si el modal necesita más procesamiento
-       return formatVehicleDataForModal(worksheet); 
-   } catch(error: any) {
-       console.error("Error en processDataForModal:", error);
-       return [['Error formateando datos para modal']];
-   }
-}
-
-
-
 // ============================================================
 // === Componente Principal ComparisonView =====================
 // ============================================================
@@ -315,6 +302,10 @@ function ComparisonView() {
 
 
   const workerRef = useRef<Worker | null>(null);
+
+  const PAGE_SIZE = 100;
+  const [newPage, setNewPage] = useState(1);
+  const [comparePage, setComparePage] = useState(1);
 
   // Limpieza del worker al desmontar
   useEffect(() => {
@@ -444,6 +435,7 @@ function ComparisonView() {
                   setPreviewData(processedPreview);
  // Guarda datos raw para la otra ventana flotante "Vista Previa (Raw)"
  setModalData(processedPreview);
+ setNewPage(1);  
                   console.log("Vista previa procesada para modal.");
               } catch (error: any) { 
                   console.error("Error al procesar vista previa:", error);
@@ -512,6 +504,7 @@ function ComparisonView() {
 
                 // === ¡AQUÍ SE ACTUALIZA EL ESTADO CON LOS DATOS DEL WORKER! ===
                 setComparisonDisplayData(displayData);
+                setComparePage(1);
                 setComparisonDifferences(new Set(differences)); // Guardar diferencias como Set
                 if (examples) setDebugExamples(examples); // Guardar ejemplos de debug
                 // ==============================================================
@@ -569,6 +562,40 @@ console.log('comparisonError:', comparisonError);
 console.log('comparisonDisplayData:', comparisonDisplayData ? `Tiene ${comparisonDisplayData.length} filas` : comparisonDisplayData);
 console.log('comparisonDifferences:', comparisonDifferences ? `Tiene ${comparisonDifferences.size} diferencias` : comparisonDifferences);
 
+// Datos paginados para modal "Archivo Nuevo"
+// 1) Asegúrate de que modalData no sea null y tenga al menos una fila de encabezado
+const allNewData = modalData || [];
+const newHeader = allNewData[0] || [];             // fila 0
+const newDataRows = allNewData.slice(1);           // resto de filas
+
+// 2) Calcula páginas
+const newTotalPages = Math.ceil(newDataRows.length / PAGE_SIZE);
+const currentNewRows = newDataRows.slice(
+  (newPage - 1) * PAGE_SIZE,
+  newPage * PAGE_SIZE
+);
+
+// 3) Anteponer el encabezado a la página
+const newPageData = [newHeader, ...currentNewRows];
+
+
+// Datos paginados para modal "Comparación"
+const allCompareData = comparisonDisplayData || [];
+const compareHeader = allCompareData[0] || [];
+const compareDataRows = allCompareData.slice(1);
+
+const compareTotalPages = Math.ceil(compareDataRows.length / PAGE_SIZE);
+const currentCompareRows = compareDataRows.slice(
+  (comparePage - 1) * PAGE_SIZE,
+  comparePage * PAGE_SIZE
+);
+
+const comparePageData = [compareHeader, ...currentCompareRows];
+
+
+
+
+
   // --- Renderizado del Componente ---
   return (
     <div className="admin-container">
@@ -580,14 +607,8 @@ console.log('comparisonDifferences:', comparisonDifferences ? `Tiene ${compariso
           <Button variant="contained">Ayuda</Button>
         </div>
       </nav>
-      {/* Sidebar */}
-      <div className="sidebar">
-        <ul>
-          <li>Mostrar Datos</li>
-          <li>Búsqueda en PDF</li>
-          <li>Historial</li>
-        </ul>
-      </div>
+
+
       {/* Main Content */}
       <div className="main-content">
         <div className="upload-section">
@@ -632,12 +653,6 @@ console.log('comparisonDifferences:', comparisonDifferences ? `Tiene ${compariso
 
         </div>
       </div>
-      {/* Footer */}
-      <footer>
-        <Button variant="contained" color="primary">Guardar Cambios</Button>
-        <Button variant="contained" color="secondary">Exportar Reporte</Button>
-        <Button variant="contained" color="error">Cancelar</Button>
-      </footer>
       
       {/* Barra y Ventanas Flotantes */}
        <MinimizedWindowsBar />
@@ -668,73 +683,122 @@ console.log('comparisonDifferences:', comparisonDifferences ? `Tiene ${compariso
            {/* Otras Floating Windows si las tienes */}
        </div>
 
-      {/* === MODAL "ARCHIVO NUEVO (PROCESADO)" === */}
-      <DataModal
-        open={modalOpen}
-        title="Archivo Nuevo (Procesado para Vista)"
-        onClose={() => setModalOpen(false)}
-        modalStyle={{ 
-          width: '45%', top: '10%', left: '5%', transform: 'none',
-          zIndex: zIndices.archivo, 
-          height: '85vh', 
-           display: 'flex', flexDirection: 'column' 
-        }}
-        onMouseDown={bringArchivoFront} // Traer al frente al hacer clic DENTRO
-        data={
-          // Envolver contenido en div si onMouseDown no funciona directo en DataModal
-          // <div onMouseDown={bringArchivoFront} style={{height: '100%', width: '100%', display: 'flex', flexDirection: 'column'}}>
-            <Box sx={{ height: '100%', width: '100%', display: 'flex', flexDirection: 'column' }}>
-              {modalData ? (
-                <EditableExcelTable data={modalData} onDataChange={setModalData} />
-              ) : (
-                <p style={{padding: '20px'}}>Carga un archivo nuevo para ver datos procesados.</p>
-              )}
-            </Box>
-          // </div>
-        }
-      />
+{/* === MODAL "ARCHIVO NUEVO (PROCESADO)" === */}
+<DataModal
+  open={modalOpen}
+  title="Archivo Nuevo (Procesado para Vista)"
+  onClose={() => setModalOpen(false)}
+  modalStyle={{
+    width: '45%',
+    top: '10%',
+    left: '5%',
+    transform: 'none',
+    zIndex: zIndices.archivo,
+    height: '85vh',
+    display: 'flex',
+    flexDirection: 'column'
+  }}
+  onMouseDown={bringArchivoFront}
+  data={
+    <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+      {modalData ? (
+        <>
+          {/* Área de la tabla con scroll */}
+          <Box sx={{ flex: 1, overflowY: 'auto' }}>
+            <EditableExcelTable
+              data={newPageData}
+              onDataChange={setModalData}
+            />
+          </Box>
 
-      {/* === MODAL DE COMPARACIÓN === */}
-      <DataModal
-        open={isComparisonModalOpen}
-        title={isComparing ? "Comparando..." : (comparisonError ? "Error" : "Comparación (Base vs Nuevo)")}
-        onClose={() => setIsComparisonModalOpen(false)}
-        modalStyle={{ 
-          width: '45%', top: '10%', left: '52%', transform: 'none', 
-          zIndex: zIndices.comparacion, 
-          display: 'flex', flexDirection: 'column',
-          height: '85vh' 
-        }}
-         onMouseDown={bringComparacionFront} // Traer al frente al hacer clic DENTRO
-        data={
-           // Envolver contenido en div si onMouseDown no funciona directo en DataModal
-          // <div onMouseDown={bringComparacionFront} style={{height: '100%', width: '100%', display: 'flex', flexDirection: 'column'}}>
-            <Box sx={{ height: '100%', width: '100%', display: 'flex', flexDirection: 'column', p: 1 }}>
-              {/* Indicador de Carga */}
-              {isComparing && (
-                <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
-                  <CircularProgress />
-                  <Typography sx={{ ml: 2 }}>Procesando y comparando datos...</Typography>
-                </Box>
-              )}
-              {/* Mensaje de Error */}
-              {comparisonError && ( <Alert severity="error">Error: {comparisonError}</Alert> )}
+          {/* Control de paginación */}
+          <Box sx={{ display: 'flex', justifyContent: 'center', my: 1 }}>
+            <Pagination
+              count={newTotalPages}
+              page={newPage}
+              onChange={(_, p) => setNewPage(p)}
+              size="small"
+            />
+          </Box>
+        </>
+      ) : (
+        <Box sx={{ p: 2 }}>
+          Carga un archivo nuevo para ver datos procesados.
+        </Box>
+      )}
+    </Box>
+  }
+/>
 
-              {/* Visor de Comparación (Si hay resultados y no error) */}
-              {!isComparing && !comparisonError && comparisonDisplayData && comparisonDifferences && (
-                <ComparisonViewer 
-                  displayData={comparisonDisplayData} 
-                  differences={comparisonDifferences} 
-                />
-              )}
-              {/* Mensaje Inicial o si no hay datos (y no error/carga) */}
-              {!isComparing && !comparisonError && !comparisonDisplayData && (
-                  <Typography sx={{ p: 2 }}>Resultados de la comparación aparecerán aquí.</Typography>
-              )}
-            </Box>
-          // </div>
-        }
-      />
+{/* === MODAL DE COMPARACIÓN === */}
+<DataModal
+  open={isComparisonModalOpen}
+  title={
+    isComparing
+      ? "Comparando..."
+      : comparisonError
+      ? "Error"
+      : "Comparación (Base vs Nuevo)"
+  }
+  onClose={() => setIsComparisonModalOpen(false)}
+  modalStyle={{
+    width: '45%',
+    top: '10%',
+    left: '52%',
+    transform: 'none',
+    zIndex: zIndices.comparacion,
+    display: 'flex',
+    flexDirection: 'column',
+    height: '85vh'
+  }}
+  onMouseDown={bringComparacionFront}
+  data={
+    <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', p: 1 }}>
+      {/* Indicador de carga */}
+      {isComparing && (
+        <Box sx={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+          <CircularProgress />
+          <Typography sx={{ ml: 2 }}>Procesando y comparando datos...</Typography>
+        </Box>
+      )}
+
+      {/* Mensaje de error */}
+      {comparisonError && (
+        <Alert severity="error">Error: {comparisonError}</Alert>
+      )}
+
+      {/* Tabla paginada de comparación */}
+      {!isComparing && !comparisonError && comparisonDisplayData && comparisonDifferences && (
+        <>
+          <Box sx={{ flex: 1, overflowY: 'auto' }}>
+            <ComparisonViewer
+              displayData={comparePageData}
+              differences={comparisonDifferences}
+            />
+          </Box>
+
+          <Box sx={{ display: 'flex', justifyContent: 'center', my: 1 }}>
+            <Pagination
+              count={compareTotalPages}
+              page={comparePage}
+              onChange={(_, p) => setComparePage(p)}
+              size="small"
+            />
+          </Box>
+        </>
+      )}
+
+      {/* Mensaje inicial si no hay datos */}
+      {!isComparing && !comparisonError && !comparisonDisplayData && (
+        <Box sx={{ p: 2 }}>
+          Resultados de la comparación aparecerán aquí.
+        </Box>
+      )}
+    </Box>
+  }
+/>
+
+
     </div>
   );
 }
