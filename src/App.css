@@ -196,3 +196,10 @@ footer:hover {
   from { transform: translateY(20px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
 }
+
+
+.difference-cell {
+  background-color: #ffebee !important; 
+  color: #d32f2f !important;
+  font-weight: bold !important;
+} 
